@@ -1,4 +1,5 @@
 # moji-physics-smartphone
+日本語 English
 
 文字物理(moji-physics)のスマートフォン対応バージョンです。 This is the smartphone-compatible version of moji-physics.
 多分元のバージョンでもできはすると思います。 I think it's probably possible with the original version as well.

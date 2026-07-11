@@ -46,6 +46,7 @@
             display: block;
         }
 
+        /* レスポンシブ調整を施したコントロールUI */
         .controls {
             position: absolute;
             top: 15px;
@@ -65,7 +66,7 @@
 
         .instruction {
             position: absolute;
-            bottom: 15px;
+            bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
             color: #5d4037;
@@ -73,7 +74,7 @@
             text-align: center;
             pointer-events: none;
             background: rgba(255, 255, 255, 0.7);
-            padding: 6px 15px;
+            padding: 8px 15px;
             border-radius: 4px;
             border: 1px solid rgba(200, 80, 80, 0.3);
             transition: all 0.5s;
@@ -110,7 +111,7 @@
         <button id="backBtn" class="bg-blue-900 hover:bg-blue-800 text-white px-3 md:px-4 py-1.5 md:py-2 rounded font-bold shadow-md transition-all active:scale-95 text-xs sm:text-sm md:text-base">戻す</button>
     </div>
 
-    <!-- バーチャルキーボード関連要素（スマホ対応レイアウト） -->
+    <!-- バーチャルキーボード関連（レスポンシブ設計：スマホでは下部に広く、PCでは右下に） -->
     <button id="vkToggleBtn" class="fixed bottom-4 right-4 bg-gray-800 text-white w-10 h-10 md:w-12 md:h-12 flex items-center justify-center rounded-full shadow-lg z-50 transition-transform active:scale-95 text-xl md:text-2xl pointer-events-auto">
         ⌨️
     </button>
@@ -118,6 +119,8 @@
     <div id="virtualKeyboard" class="fixed bottom-16 left-4 right-4 md:left-auto md:right-4 md:bottom-20 bg-white/85 backdrop-blur-md p-3 md:p-4 rounded-lg shadow-xl border border-gray-200 flex flex-col gap-2 z-50 hidden transition-opacity pointer-events-auto max-w-sm mx-auto md:mx-0">
         <div class="text-xs md:text-sm font-bold text-gray-700 text-center mb-1 border-b pb-1 border-gray-300">バーチャルキーボード</div>
         <div class="grid grid-cols-2 gap-2">
+            <button id="vk-rotate-left" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1.5 md:py-2 px-2 md:px-3 rounded text-xs md:text-sm shadow active:scale-95 transition-transform">左回転 (←)</button>
+            <button id="vk-rotate-right" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1.5 md:py-2 px-2 md:px-3 rounded text-xs md:text-sm shadow active:scale-95 transition-transform">右回転 (→)</button>
             <button id="vk-fix" class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-1.5 md:py-2 px-2 md:px-3 rounded text-xs md:text-sm shadow active:scale-95 transition-transform">固定 (k)</button>
             <button id="vk-delete" class="bg-stone-600 hover:bg-stone-700 text-white font-bold py-1.5 md:py-2 px-2 md:px-3 rounded text-xs md:text-sm shadow active:scale-95 transition-transform">消去 (削除)</button>
             <button id="vk-s" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1.5 md:py-2 px-2 md:px-3 rounded text-xs md:text-sm shadow active:scale-95 transition-transform">S極 (s)</button>
@@ -139,7 +142,7 @@
         let isAbyss = false;
         let isBlowing = false;
         let isBouncing = false;
-        let lastGrabbedBody = null; // バーチャルキーボード用に直前に掴んだ物体を保持
+        let lastGrabbedBody = null; 
 
         const BOUNCE_SPEED = 5; 
         const ABYSS_FALL_SPEED = 1.2;
@@ -220,7 +223,7 @@
 
         window.addEventListener('wheel', (e) => {
             const grabbedBody = mouseConstraint.body;
-            if (grabbedBody && !grabbedBody.isStatic) {
+            if (grabbedBody && (!grabbedBody.isStatic || grabbedBody.isStaticToggle)) {
                 const rotationDelta = e.deltaY > 0 ? 0.2 : -0.2;
                 Body.rotate(grabbedBody, rotationDelta);
                 if (grabbedBody.dragContext) {
@@ -234,11 +237,26 @@
         Events.on(mouseConstraint, 'startdrag', (event) => {
             const body = event.body;
             body.dragContext = { fixedAngle: body.angle };
-            lastGrabbedBody = body; // バーチャルキーボードの操作対象として記録
+            lastGrabbedBody = body; 
+            
+            // 固定中のオブジェクトをドラッグする場合、一時的に固定を解除する
+            if (body.isStaticToggle) {
+                Body.setStatic(body, false);
+            }
         });
 
         Events.on(mouseConstraint, 'enddrag', (event) => {
-            if (event.body) event.body.dragContext = null;
+            const body = event.body;
+            if (body) {
+                body.dragContext = null;
+                
+                // 元々固定設定だったものは、ドラッグを終えた瞬間に空中で再度固定する
+                if (body.isStaticToggle) {
+                    Body.setStatic(body, true);
+                    Body.setVelocity(body, { x: 0, y: 0 });
+                    Body.setAngularVelocity(body, 0);
+                }
+            }
         });
 
         window.addEventListener('keydown', (e) => {
@@ -266,16 +284,23 @@
         });
 
         function toggleStatic(targetBody) {
-            if (!targetBody.isStaticToggle && !targetBody.isStatic) {
-                Body.setStatic(targetBody, true);
+            if (targetBody.isStatic && !targetBody.isStaticToggle) return;
+
+            if (!targetBody.isStaticToggle) {
                 targetBody.isStaticToggle = true;
                 if (targetBody.customText) targetBody.customText.opacity = 0.6;
-                mouseConstraint.body = null;
+                
+                if (mouseConstraint.body !== targetBody) {
+                    Body.setStatic(targetBody, true);
+                }
                 playPopSound(300, 'square', 0.05);
             } else if (targetBody.isStaticToggle) {
-                Body.setStatic(targetBody, false);
                 targetBody.isStaticToggle = false;
                 if (targetBody.customText) targetBody.customText.opacity = 1.0;
+                
+                if (mouseConstraint.body !== targetBody) {
+                    Body.setStatic(targetBody, false);
+                }
                 playPopSound(500, 'sine', 0.05);
             }
         }
@@ -333,9 +358,9 @@
         function addWord(text, xPos, yPos, options = {}) {
             if (!text) return;
             
-            // スマホ画面（幅 640px 未満）の場合は文字サイズを自動で 0.7 倍にスケールダウン
+            // スマホ画面（幅 640px 未満）の場合は文字サイズを自動で 0.7 倍に縮小する
             const scaleFactor = (width < 640) ? 0.7 : 1.0;
-            const baseSize = options.fontSize || Math.floor(Math.random() * 10) + 45; 
+            const baseSize = options.fontSize || Math.floor(Math.random() * 10) + 45;
             const fontSize = Math.floor(baseSize * scaleFactor);
             
             const x = xPos !== undefined && xPos !== null ? xPos : Math.random() * (width - 100) + 50;
@@ -516,9 +541,6 @@
             });
         });
 
-        // ==========================================
-        // バーチャルキーボードの制御用オブジェクト
-        // ==========================================
         const virtualKeyboard = document.getElementById('virtualKeyboard');
         const vkToggleBtn = document.getElementById('vkToggleBtn');
 
@@ -539,34 +561,40 @@
                     // バーチャルキーボードが表示中、かつ選択中の場合のみハイライトを適用する
                     const isSelected = (body === lastGrabbedBody) && !virtualKeyboard.classList.contains('hidden');
 
-                    if (isSelected) {
-                        context.fillStyle = "#ff9800"; // 選択中はオレンジ色
+                    // 描画色の優先順位変更：磁石状態を最優先
+                    if (body.customText.magnet) {
+                        context.fillStyle = (body.customText.magnet === 'S') ? "#2196F3" : "#F44336";
+                    } else if (isSelected) {
+                        context.fillStyle = "#ff9800"; 
                     } else if (body.label === 'ice_floor' || (body.customText && body.customText.content === "氷")) {
                         context.fillStyle = "#a5f3fc"; 
                     } else {
                         context.fillStyle = color;
                     }
                     
-                    if (isAbyss) {
-                        context.shadowColor = isSelected ? '#ff9800' : 'rgba(255,255,255,0.6)';
-                        context.shadowBlur = isSelected ? 15 : 10;
-                    } else {
-                        context.shadowColor = 'rgba(0,0,0,0.2)';
-                        context.shadowBlur = 4;
-                        context.shadowOffsetX = 2;
-                        context.shadowOffsetY = 2;
-                    }
-                    
-                    if (isSelected) {
-                         context.shadowColor = '#ff9800';
-                         context.shadowBlur = 15;
-                         context.shadowOffsetX = 0;
-                         context.shadowOffsetY = 0;
-                    } else if (body.customText.magnet) {
+                    // 影の優先順位変更：磁石状態を最優先
+                    if (body.customText.magnet) {
                         context.shadowBlur = 15;
                         context.shadowColor = (body.customText.magnet === 'S') ? "#2196F3" : "#F44336";
                         context.shadowOffsetX = 0;
                         context.shadowOffsetY = 0;
+                    } else if (isSelected) {
+                         context.shadowColor = '#ff9800';
+                         context.shadowBlur = 15;
+                         context.shadowOffsetX = 0;
+                         context.shadowOffsetY = 0;
+                    } else {
+                        if (isAbyss) {
+                            context.shadowColor = 'rgba(255,255,255,0.6)';
+                            context.shadowBlur = 10;
+                            context.shadowOffsetX = 0;
+                            context.shadowOffsetY = 0;
+                        } else {
+                            context.shadowColor = 'rgba(0,0,0,0.2)';
+                            context.shadowBlur = 4;
+                            context.shadowOffsetX = 2;
+                            context.shadowOffsetY = 2;
+                        }
                     }
 
                     if (charData.type === 'alphabet') {
@@ -608,14 +636,15 @@
         function addAbyssWords(message) {
             const chars = message.split('');
             const baseFontSize = 55;
-            const fontSize = Math.floor(baseFontSize * ((width < 640) ? 0.7 : 1.0));
+            const scaleFactor = (width < 640) ? 0.7 : 1.0;
+            const fontSize = Math.floor(baseFontSize * scaleFactor);
             const spacing = fontSize * 1.05;
             const totalWidth = (chars.length - 1) * spacing;
             const startX = (width - totalWidth) / 2;
 
             chars.forEach((char, i) => {
                 addWord(char, startX + i * spacing, -100, {
-                    fontSize: baseFontSize, // addWord側で自動スケーリングされます
+                    fontSize: baseFontSize, // addWord関数内で自動スケーリングされます
                     isSensor: true
                 });
             });
@@ -773,6 +802,23 @@
                 }
             }, 30);
         });
+
+        // スマホなどのタッチパネル（touchstart）でも確実に対象オブジェクトの選択解除や検出をサポート
+        render.canvas.addEventListener('touchstart', (e) => {
+            const touch = e.touches[0];
+            if (!touch) return;
+            const rect = render.canvas.getBoundingClientRect();
+            const mousePos = {
+                x: touch.clientX - rect.left,
+                y: touch.clientY - rect.top
+            };
+            const bodiesAtPoint = Matter.Query.point(Composite.allBodies(world), mousePos);
+            if (bodiesAtPoint.length === 0) {
+                lastGrabbedBody = null;
+            } else {
+                lastGrabbedBody = bodiesAtPoint[0];
+            }
+        });
         
         window.addEventListener('resize', () => {
             width = window.innerWidth; height = window.innerHeight;
@@ -790,7 +836,8 @@
             const x = Math.random() * (width - 200) + 100;
             const y = -50;
             const baseFontSize = 60;
-            const fontSize = Math.floor(baseFontSize * ((width < 640) ? 0.7 : 1.0));
+            const scaleFactor = (width < 640) ? 0.7 : 1.0;
+            const fontSize = Math.floor(baseFontSize * scaleFactor);
             const w = fontSize * 6; 
             const h = fontSize * 1.2;
 
@@ -816,7 +863,8 @@
         function addChain(text) {
             const chars = text.split('');
             const baseFontSize = 50;
-            const fontSize = Math.floor(baseFontSize * ((width < 640) ? 0.7 : 1.0));
+            const scaleFactor = (width < 640) ? 0.7 : 1.0;
+            const fontSize = Math.floor(baseFontSize * scaleFactor);
             const startX = Math.random() * (width - 200) + 100;
             const startY = 100; 
             
@@ -824,7 +872,8 @@
 
             chars.forEach((char, i) => {
                 const currentY = startY + (i * (fontSize + 10));
-                const body = addWord(char, startX, currentY, { fontSize: baseFontSize }); // fontSizeはaddWord内でスケールされます
+                // addWordに元のbaseFontSizeを渡すことで、内部で自動スケールされます
+                const body = addWord(char, startX, currentY, { fontSize: baseFontSize }); 
 
                 if (lastBody && body) {
                     const constraint = Matter.Constraint.create({
@@ -849,7 +898,8 @@
 
         function addIceFloorObject(text) {
             const baseFontSize = 55;
-            const fontSize = Math.floor(baseFontSize * ((width < 640) ? 0.7 : 1.0));
+            const scaleFactor = (width < 640) ? 0.7 : 1.0;
+            const fontSize = Math.floor(baseFontSize * scaleFactor);
             const w = fontSize * 14; 
             const h = fontSize * 1.5; 
             const x = Math.random() * (width - w) + w / 2;
@@ -874,10 +924,10 @@
             Composite.add(world, iceBody);
         }
 
-        // 引数に「font = 'serif'」を追加して、未定義エラーを防ぎます
         function addConnectedObject(text, font = 'serif') {
             const baseFontSize = 55;
-            const fontSize = Math.floor(baseFontSize * ((width < 640) ? 0.7 : 1.0));
+            const scaleFactor = (width < 640) ? 0.7 : 1.0;
+            const fontSize = Math.floor(baseFontSize * scaleFactor);
             const w = fontSize * text.length * 0.8; 
             const h = fontSize * 1.2;
             const x = Math.random() * (width - w) + w / 2;
@@ -902,30 +952,24 @@
             playPopSound(500, 'sine', 0.1);
         }
 
-        // キーボードの表示/非表示を切り替え
         vkToggleBtn.addEventListener('click', () => {
             virtualKeyboard.classList.toggle('hidden');
             playPopSound(500, 'sine', 0.05);
         });
 
-        // 「ドラッグ中のもの」または「直前に掴んだもの」を確実に対象にするための関数
         function getTargetBody() {
             return mouseConstraint.body || lastGrabbedBody;
         }
 
-        // --- 各ボタンのイベント設定 ---
-
-        // 固定(k)ボタン
+        // --- 各バーチャルボタンのイベント登録 ---
         document.getElementById('vk-fix').addEventListener('click', () => {
             const targetBody = getTargetBody();
             if (targetBody) toggleStatic(targetBody);
         });
 
-        // 消去ボタン（右クリックと同等）
         document.getElementById('vk-delete').addEventListener('click', () => {
             const targetBody = getTargetBody();
             if (targetBody && (!targetBody.isStatic || targetBody.isStaticToggle)) {
-                // オブジェクトに付随する「鎖」などの拘束を同時に消去
                 const allConstraints = Composite.allConstraints(world);
                 allConstraints.forEach(constraint => {
                     if (constraint.bodyA === targetBody || constraint.bodyB === targetBody) {
@@ -935,13 +979,11 @@
                 Composite.remove(world, targetBody);
                 playPopSound(200, 'square', 0.05);
                 
-                // 削除した対象が現在ドラッグ中の場合、解除処理を行う
                 if (mouseConstraint.body === targetBody) mouseConstraint.body = null;
                 if (lastGrabbedBody === targetBody) lastGrabbedBody = null;
             }
         });
 
-        // S極(s)ボタン
         document.getElementById('vk-s').addEventListener('click', () => {
             const targetBody = getTargetBody();
             if (targetBody && targetBody.customText) {
@@ -951,7 +993,6 @@
             }
         });
 
-        // N極(n)ボタン
         document.getElementById('vk-n').addEventListener('click', () => {
             const targetBody = getTargetBody();
             if (targetBody && targetBody.customText) {
@@ -961,7 +1002,22 @@
             }
         });
 
-        // 風(b)ボタン - タッチデバイスでも「押しっぱなし」が効くようにPointerイベントを使用
+        // 回転ボタン（左・右）
+        function rotateBody(delta) {
+            const targetBody = getTargetBody();
+            if (targetBody && (!targetBody.isStatic || targetBody.isStaticToggle)) {
+                Body.rotate(targetBody, delta);
+                if (targetBody.dragContext) {
+                    targetBody.dragContext.fixedAngle = targetBody.angle;
+                }
+                Body.setAngularVelocity(targetBody, 0);
+                playPopSound(500, 'sine', 0.05);
+            }
+        }
+        document.getElementById('vk-rotate-left').addEventListener('click', () => rotateBody(-0.2));
+        document.getElementById('vk-rotate-right').addEventListener('click', () => rotateBody(0.2));
+
+        // 風(b)ボタン - タッチ・PC両対応
         const btnWind = document.getElementById('vk-wind');
         const startWind = (e) => { e.preventDefault(); isBlowing = true; };
         const stopWind = (e) => { e.preventDefault(); isBlowing = false; };

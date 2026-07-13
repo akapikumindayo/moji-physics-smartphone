@@ -461,20 +461,38 @@
                     Body.setAngularVelocity(body, 0);
                     Body.setVelocity(body, { x: 0, y: ABYSS_FALL_SPEED });
                 }
+                // 磁石の計算は、他のオブジェクトの数に影響されないように独立して実行する
+            const magnets = bodies.filter(b => b.customText && b.customText.magnet);
 
-                const magnets = bodies.filter(b => b.customText && b.customText.magnet);
+            // 【新機能】片方が固定されている時に磁力を半分にする機能のオンオフ（trueで有効、falseで無効）
+            const IS_MAGNET_HALF_ON_STATIC = true;
 
-                magnets.forEach((bodyB, i) => {
-                    for (let j = i + 1; j < magnets.length; j++) {
-                        const bodyA = magnets[j];
+            magnets.forEach((bodyB, i) => {
+                for (let j = i + 1; j < magnets.length; j++) {
+                    const bodyA = magnets[j];
+                    
+                    if (bodyA.isStatic && bodyB.isStatic) continue;
+
+                    const vec = Vector.sub(bodyA.position, bodyB.position);
+                    const distance = Vector.magnitude(vec);
+
+                    if (distance < 300 && distance > 25) {
+                        const massB = bodyB.isStatic ? 30 : bodyB.mass;
+                        const massA = bodyA.isStatic ? 30 : bodyA.mass;
+
+                        // ベースの磁力計算
+                        let forceMagnitude = (massB * massA) / (distance * distance) * 20; 
+
+                        // 【修正】ただ掴んでいるだけの場合を除外し、本当にロック（ピン留め）されている磁石があるか厳密にチェック
+                        const isStrictStaticB = bodyB.isStatic && !bodyB.dragContext;
+                        const isStrictStaticA = bodyA.isStatic && !bodyA.dragContext;
+
+                        if (IS_MAGNET_HALF_ON_STATIC && (isStrictStaticB || isStrictStaticA)) {
+                            // 変化がわかりやすいように、半分(0.5)からさらに「4分の1(0.25)」まで磁力をガッツリ落とします
+                            forceMagnitude *= 0.25; 
+                        }
                         
-                        if (bodyA.isStatic && bodyB.isStatic) continue;
-
-                        const vec = Vector.sub(bodyA.position, bodyB.position);
-                        const distance = Vector.magnitude(vec);
-
-                        if (distance < 300 && distance > 25) {
-                            const forceMagnitude = (bodyB.mass * bodyA.mass) / (distance * distance) * 3; 
+                        if (distance > 0.001) {
                             const force = Vector.mult(Vector.normalise(vec), forceMagnitude);
                             const isSamePole = bodyB.customText.magnet === bodyA.customText.magnet;
                             
@@ -489,9 +507,9 @@
                             }
                         }
                     }
-                });
+                }
             });
-        });
+            });
 
         Events.on(engine, 'collisionStart', (event) => {
             event.pairs.forEach((pair) => {
